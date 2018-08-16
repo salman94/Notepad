@@ -1,18 +1,22 @@
 import javax.swing.*;
 import java.awt.*;
-import java.io.*;
+import java.net.URL;
 import java.awt.event.*;
-import javax.swing.event.CaretEvent;
-import javax.swing.event.CaretListener;
-import javax.swing.event.MenuListener;
-import javax.swing.event.MenuEvent;
-import javax.swing.event.UndoableEditEvent;
-import javax.swing.event.UndoableEditListener;
+import java.awt.print.PageFormat;
+import java.awt.print.Printable;
+import java.awt.print.PrinterException;
+import java.awt.print.PrinterJob;
+import javax.swing.event.*;
 import javax.swing.undo.UndoManager;
 import javax.swing.undo.CannotRedoException;
-import javax.swing.JButton;
+import java.text.SimpleDateFormat;   
+import java.util.Date; 
+import findDialog.FindDialog;
+import font.FontChooser;
+import aboutNotepad.AboutNotepad;
+import fileOperation.FileOperation;
 
-class Notepad implements ActionListener {
+class Notepad implements ActionListener, Printable {
 // Menu items...
 	final String fileMenu = "File";
 	final String editMenu = "Edit";
@@ -49,7 +53,11 @@ class Notepad implements ActionListener {
 	JFrame frm;
 	JTextArea ta;
 	JLabel statusBar;
-	
+	FindDialog findReplaceDialog = null;
+	FontChooser fontDialog = null;
+	FileOperation fileOperation = null;
+	PrinterJob job = null;
+	PageFormat pageFormat = null;
 	////////
 		JMenuBar mb;
 		JMenu newFileMenu;
@@ -87,7 +95,7 @@ class Notepad implements ActionListener {
 //Constructor
 	Notepad(){
 		frm = new JFrame(fileName+" - "+applicationName);
-		frm.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		frm.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		statusBar = new JLabel("Ln 1, Col 1",JLabel.RIGHT);
 		ta = new JTextArea(30,60);
 		frm.add(new JScrollPane(ta),BorderLayout.CENTER);
@@ -95,7 +103,17 @@ class Notepad implements ActionListener {
 		frm.add(new JLabel("  "),BorderLayout.EAST);  
 		frm.pack();
 		frm.setVisible(true);
+		
 		createMenu(frm);
+		
+		frm.addWindowListener(new WindowAdapter() {
+			public void windowClosing(WindowEvent e) {
+				if(fileOperation == null)
+					fileOperation = new FileOperation(frm, ta, fileName);
+				fileOperation.exitFileOperation();
+			}
+			
+		});
 	//For current cursur position
 		ta.addCaretListener(new CaretListener()  {
 			public void caretUpdate(CaretEvent e){
@@ -120,6 +138,28 @@ class Notepad implements ActionListener {
 	}
 	
 // action performed event listener method
+	public void goTo(){
+		try{
+		int position = ta.getCaretPosition();
+		int lineNumber = ta.getLineOfOffset(position);
+		lineNumber++;
+		int totalPosition = ta.getText().length();
+		int totalLineNumber = ta.getLineOfOffset((totalPosition))+1;
+		String directionLine = JOptionPane.showInputDialog(null, "Line number:",lineNumber);
+		int inputlineNumber = Integer.parseInt(directionLine);
+		if(inputlineNumber <= totalLineNumber){
+			inputlineNumber = ta.getLineStartOffset((inputlineNumber-1));
+			ta.setCaretPosition(inputlineNumber);
+		}
+		else{
+			JOptionPane.showMessageDialog(null,"The line nymber is beyond the total number of lines.","Notepad - Goto Line",JOptionPane.PLAIN_MESSAGE);
+		}
+		
+		}catch(Exception exc){
+			
+		}
+	}
+	
 	public void actionPerformed(ActionEvent e){
 		//for undo operation
 		if(e.getSource() == Undo){
@@ -127,19 +167,24 @@ class Notepad implements ActionListener {
 			UndoManager undoManager = new UndoManager();
 			ta.getDocument().addUndoableEditListener(
 				new UndoableEditListener() {
-				  public void undoableEditHappened(UndoableEditEvent e) {
-					undoManager.addEdit(e.getEdit());
+				  public void undoableEditHappened(UndoableEditEvent ee) {
+					undoManager.addEdit(ee.getEdit());
 					//updateButtons();
 				  }
 				});
+			
 			Undo.addActionListener(new ActionListener(){
-				public void actionPerformed(ActionEvent e){ 
-				try {
-					undoManager.undo();
-				} catch (CannotRedoException cre) {
-					cre.printStackTrace();
+				public void actionPerformed(ActionEvent eee){ 
+				try{
+					if(undoManager.canUndo()){
+						
+						undoManager.undo();
+					}
 				}
-			}});
+				catch(Exception  ex){
+					ex.printStackTrace();
+				}
+				}});
         //updateButtons();*/
 		//undoManager.undo();
 		}
@@ -147,32 +192,36 @@ class Notepad implements ActionListener {
 		if(e.getSource() == Cut){
 			try {
 					ta.cut();
-				}catch (CannotRedoException cre) {
-					cre.printStackTrace();
+				}
+			catch(Exception ex){
+					ex.printStackTrace();
 				}
 		}
 		// for copy operation
 		if(e.getSource() == Copy){
 			try {
 					ta.copy();
-				}catch (CannotRedoException cre) {
-					cre.printStackTrace();
+				}
+			catch(Exception ex){
+					ex.printStackTrace();
 				}
 		}
 		// for paste operation
 		if(e.getSource() == Paste){
 			try {
 					ta.paste();
-				}catch (CannotRedoException cre) {
-					cre.printStackTrace();
+				}
+			catch(Exception ex){
+					ex.printStackTrace();
 				}
 		}
 		// for delete operation
 		if(e.getSource() == Delete){
 			try {
 					ta.replaceSelection("");
-				}catch (CannotRedoException cre) {
-					cre.printStackTrace();
+				}
+			catch(Exception ex){
+					ex.printStackTrace();
 				}
 		}
 		// for selectAll
@@ -183,9 +232,157 @@ class Notepad implements ActionListener {
 					cre.printStackTrace();
 				}
 		}
+		if(e.getSource() == DateTime){
+			Date date = new Date();
+			SimpleDateFormat formatter = new SimpleDateFormat("hh:mm dd-MM-yyyy");
+			String strDate = formatter.format(date);
+			ta.insert(strDate,ta.getCaretPosition());
+		}
+		if(e.getSource() == Goto){
+			goTo();
+		}
+		if(e.getSource() == Find){
+			
+			if(ta.getText().length() == 0)
+				return;
+			if(findReplaceDialog == null)
+				findReplaceDialog = new FindDialog(ta);
+			findReplaceDialog.showDialog(frm,true);
+			
+		}
+		
+		if(e.getSource() == FindNext) {
+			if(ta.getText().length() == 0)
+				return;
+			if(findReplaceDialog == null) {
+				findReplaceDialog = new FindDialog(ta);
+				findReplaceDialog.showDialog(frm, true);
+			}
+			findReplaceDialog.findNext();
+			
+		}
+		if(e.getSource() == Replace) {
+			if(findReplaceDialog == null) {
+				findReplaceDialog = new FindDialog(ta);
+			}
+			findReplaceDialog.showDialog(frm, false);
+			findReplaceDialog.replaceNext();
+		}
+		if(e.getSource() == WordWrap) {
+			if(WordWrap.isSelected()) {
+				ta.setLineWrap(true);
+			}
+			else {
+				ta.setLineWrap(false);
+			}
+		}
+		if(e.getSource() == Font) {
+			
+			if(fontDialog==null)
+				fontDialog=new FontChooser(ta);
+
+			fontDialog.showDialog(Notepad.this.frm);
+		}
+		if(e.getSource() == Status) {
+			if(Status.isSelected())
+				statusBar.setVisible(true);
+			else
+				statusBar.setVisible(false);
+		}
+		if(e.getSource() == ViewHelp) {
+			///public static void openWebpage(String urlString) {
+			String urlString = "https://answers.microsoft.com/en-us/windows/forum?"
+								+ "sort=LastReplyDate&dir=Desc&tab=All&status=all&mod=&modAge=&advFil=&postedAfter=&postedBefore=&"
+									+ "threadType=All&isFilterExpanded=false&page=1";
+			    try {
+			        Desktop.getDesktop().browse(new URL(urlString).toURI());
+			    } catch (Exception ee) {
+			        ee.printStackTrace();
+			    }
+		//	}
+			
+		}
+		if(e.getSource() == About) {
+			AboutNotepad abt = new AboutNotepad();
+			abt.showDialog(frm);
+			
+		}
+		
+		
+		if(e.getSource() == Open) {
+			if(fileOperation == null)
+				fileOperation = new FileOperation(frm, this.ta, this.fileName);
+			fileOperation.openFileOperation();
+			
+		}
+		if(e.getSource() == New) {
+			if(fileOperation == null)
+				fileOperation = new FileOperation(frm, this.ta, this.fileName);
+			fileOperation.newFileOperation();
+			
+		}
+		if(e.getSource() == SaveAs) {
+			if(fileOperation == null)
+				fileOperation = new FileOperation(frm, this.ta, this.fileName);
+			fileOperation.saveAsFile();
+			
+		}
+		if(e.getSource() == Save) {
+			if(fileOperation == null)
+				fileOperation = new FileOperation(frm, this.ta, this.fileName);
+			fileOperation.saveFile();
+			
+		}
+		if(e.getSource() == Exit) {
+			if(fileOperation == null)
+				fileOperation = new FileOperation(frm, this.ta, this.fileName);
+			fileOperation.exitFileOperation();
+			
+		}
+		if(e.getSource() == PageSetUp) {
+			if(job == null)
+				job = PrinterJob.getPrinterJob();
+			pageFormat  = job.pageDialog(job.defaultPage());
+			
+		}
+		if(e.getSource() == Print) {
+			if(job == null)
+			 job = PrinterJob.getPrinterJob();
+			//System.out.println("Up");
+			job.setPrintable(this);
+			boolean ok = job.printDialog();
+	         if (ok) {
+	             try {
+	            	// System.out.println("Down");
+	                  job.print();
+	             } catch (PrinterException ex) {
+	              /* The job did not successfully complete */
+	             }
+	         }
+		}
+		
 		
 		
 	}
+	public int print(Graphics g, PageFormat pf, int page) throws PrinterException {
+
+		if (page > 0) { /* We have only one page, and 'page' is zero-based */
+		return NO_SUCH_PAGE;
+		}
+		/* User (0,0) is typically outside the imageable area, so we must
+		* translate by the X and Y values in the PageFormat to avoid clipping
+		*/
+		Graphics2D g2d = (Graphics2D)g;
+		g2d.translate(pf.getImageableX(), pf.getImageableY());
+		/* Now we perform our rendering */
+		String printContent = ta.getText();
+		g.drawString(printContent, 100, 100);
+		
+		/* tell the caller that this page is part of the printed document */
+		return PAGE_EXISTS;
+}
+
+	
 	
 // to add menu item on menubar
 	JMenu createNewMenu(String menuName){
@@ -292,6 +489,7 @@ class Notepad implements ActionListener {
 		
 		//for view menu
 		Status = createCheckBoxMenuItem(statusBarView, this);
+		Status.doClick();
 		newViewMenu.add(Status);
 		
 		//for help menu
@@ -305,16 +503,19 @@ class Notepad implements ActionListener {
 		newEditMenu.addMenuListener(new MenuListener(){
 			@Override
 			public void menuSelected(MenuEvent e){
+				
 				if(ta.getText().length()==0){
 					Delete.setEnabled(false);
 					Find.setEnabled(false);
 					FindNext.setEnabled(false);
 					Cut.setEnabled(false);
 					Copy.setEnabled(false);
+					Goto.setEnabled(false);
 				}
 				else{
 					Find.setEnabled(true);
 					FindNext.setEnabled(true);
+					Goto.setEnabled(true);
 					
 				}
 				if(ta.getSelectionStart() == ta.getSelectionEnd()){
@@ -369,4 +570,5 @@ class Notepad implements ActionListener {
 			
 		});
 	}
+
 }
