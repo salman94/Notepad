@@ -1,2 +1,2 @@
 # Notepad
-Notepad using JAVA
+This Notepad is created using Java swing. 
